@@ -16,6 +16,7 @@ open Bap.Std
 
 module Expr = Z3.Expr
 module Bool = Z3.Boolean
+module Model = Z3.Model
 
 type z3_expr = Expr.expr
 
@@ -26,14 +27,25 @@ type goal = { goal_name : string; goal_val : z3_expr }
 let goal_to_string (g : goal) : string =
   Format.sprintf "%s: %s%!" g.goal_name (Expr.to_string (Expr.simplify g.goal_val None))
 
-let refuted_goal_to_string (g : goal) (model : Z3.Model.model) : string =
+let path_to_string (p : path) : string =
+  let buf = Buffer.create 1024 in
+  Jmp.Map.iteri p ~f:(fun ~key:jmp ~data:taken ->
+      match Term.get_attr jmp address with
+      | None -> ()
+      | Some addr ->
+        Buffer.add_string buf (Format.sprintf "Branch Addr: %s  Taken: %b\n%!"
+                                 (Addr.to_string addr) taken)
+    );
+  Buffer.contents buf
+
+let refuted_goal_to_string (g : goal) (model : Model.model) : string =
   let buf = Buffer.create 1024 in
   Buffer.add_string buf (Format.sprintf "%s:" g.goal_name);
   if Bool.is_eq g.goal_val then begin
     let args = Expr.get_args g.goal_val in
     Buffer.add_string buf "\n\tConcrete values: = ";
     List.iter args ~f:(fun arg ->
-        let value = Option.value_exn (Z3.Model.eval model arg true) in
+        let value = Option.value_exn (Model.eval model arg true) in
         Buffer.add_string buf (Format.sprintf "%s " (Expr.to_string value)));
     Buffer.add_string buf "\n\tZ3 Expression: = ";
     List.iter args ~f:(fun arg ->
@@ -125,7 +137,7 @@ let get_refuted_goals_and_paths (constr : t) (solver : Z3.Solver.solver)
     match constr with
     | Goal g ->
       let goal_val = Expr.substitute g.goal_val olds news in
-      let goal_res = Option.value_exn (Z3.Model.eval model goal_val true) in
+      let goal_res = Option.value_exn (Model.eval model goal_val true) in
       begin
         match Z3.Solver.check solver [goal_res] with
         | Z3.Solver.SATISFIABLE -> Seq.empty
@@ -136,7 +148,7 @@ let get_refuted_goals_and_paths (constr : t) (solver : Z3.Solver.solver)
       end
     | ITE (jmp, cond, c1, c2) ->
       let cond_val = Expr.substitute cond olds news in
-      let cond_res = Option.value_exn (Z3.Model.eval model cond_val true) in
+      let cond_res = Option.value_exn (Model.eval model cond_val true) in
       begin
         match Z3.Solver.check solver [cond_res] with
         | Z3.Solver.SATISFIABLE ->
@@ -150,7 +162,7 @@ let get_refuted_goals_and_paths (constr : t) (solver : Z3.Solver.solver)
     | Clause (hyps, concs) ->
       let hyp_vals =
         List.map hyps ~f:(fun h ->
-            Z3.Model.eval model (eval_aux h olds news ctx) true
+            Model.eval model (eval_aux h olds news ctx) true
             |> Option.value_exn ?here:None ?error:None ?message:None)
       in
       let hyps_false =

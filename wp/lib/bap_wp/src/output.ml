@@ -39,12 +39,13 @@ let print_result (solver : Z3.Solver.solver) (status : Z3.Solver.status)
     let model = Z3.Solver.get_model solver
                 |> Option.value_exn ?here:None ?error:None ?message:None in
     Format.printf "\nModel:\n%s\n%!" (Z3.Model.to_string model);
-    let refuted_goals = Constr.get_refuted_goals goals solver ctx in
+    let refuted_goals = Constr.get_refuted_goals_and_paths goals solver ctx in
     Format.printf "\nRefuted goals:\n%!";
-    Seq.iter refuted_goals ~f:(fun g ->
-        Format.printf "%s\n%!" (Constr.refuted_goal_to_string g model))
+    Seq.iter refuted_goals ~f:(fun (goal, path) ->
+        Format.printf "%s\n%!" (Constr.refuted_goal_to_string goal model);
+        Format.printf "\t%s%!" (Constr.path_to_string path))
 
-(** [output_gdb] is similar to [print_result] except chews on the model and outputs a gdb script with a 
+(** [output_gdb] is similar to [print_result] except chews on the model and outputs a gdb script with a
     breakpoint at the subroutine and fills the appropriate registers *)
 
 let output_gdb (solver : Z3.Solver.solver) (status : Z3.Solver.status)
@@ -53,16 +54,16 @@ let output_gdb (solver : Z3.Solver.solver) (status : Z3.Solver.status)
   | Z3.Solver.SATISFIABLE ->
     let model = Z3.Solver.get_model solver
                 |> Option.value_exn ?here:None ?error:None ?message:None in
-    let varmap = Env.get_var_map env in 
+    let varmap = Env.get_var_map env in
     let module Target = (val target_of_arch (Env.get_arch env)) in
     let regmap = VarMap.filter_keys ~f:(Target.CPU.is_reg) varmap in
     let reg_val_map = VarMap.map ~f:(fun z3_reg -> Option.value_exn (Z3.Model.eval model z3_reg true)) regmap in
-    Out_channel.with_file gdb_filename  ~f:(fun t -> 
+    Out_channel.with_file gdb_filename  ~f:(fun t ->
         Printf.fprintf t "break *%s\n" func; (* The "*" is necessary to break before some slight setup *)
-        Printf.fprintf t "start\n";
-        VarMap.iteri reg_val_map ~f:(fun ~key ~data -> 
+        Printf.fprintf t "run\n";
+        VarMap.iteri reg_val_map ~f:(fun ~key ~data ->
             let hex_value = Z3.Expr.to_string data |> String.substr_replace_first ~pattern:"#" ~with_:"0" in
             Printf.fprintf t "set $%s = %s \n" (String.lowercase (Var.name key)) hex_value;
-        ))
+          ))
   | _ -> ()
 

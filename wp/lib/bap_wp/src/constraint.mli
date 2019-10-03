@@ -54,6 +54,9 @@ val mk_goal : string -> z3_expr -> goal
 (** Creates a string representation of a goal. *)
 val goal_to_string : goal -> string
 
+(** Creates a string representation of a path. *)
+val path_to_string : path -> string
+
 (** Creates a string representation of a goal that has been refuted given the model.
     This string shows the lhs and rhs of a goal that compares two values. *)
 val refuted_goal_to_string : goal -> Z3.Model.model -> string
